@@ -1552,7 +1552,7 @@ html, body {
   width: var(--modal-width, 80vw);
   max-width: none;
   height: auto;
-  min-height: 270px;
+  min-height: 0;                /* size to content — a short comment shouldn't be a tall floating modal */
   max-height: 80vh;
   white-space: normal;
   overflow-y: auto;
@@ -1560,9 +1560,71 @@ html, body {
   background: #ffffff;
   border: 2px solid #e94560;
   border-radius: 10px;
-  padding: 16px;
+  padding: 16px 16px 36px;     /* extra bottom room reserves space for the absolute 🔗 link button */
   display: flex;
   flex-direction: column;
+}
+
+/* The movie row that owns the open comment. Lifted above the dark backdrop so
+   it stays bright while the rest of the list dims, and accent-ringed to match
+   the panel's border — together they read as one attached unit. */
+.comment-source-row {
+  position: relative;
+  z-index: 201;                        /* above backdrop (199) and panel (200) */
+  box-shadow: 0 0 0 3px #e94560, 0 6px 14px rgba(0, 0, 0, 0.4);
+  border-radius: 6px;
+}
+
+/* Accent triangle bridging the lit row down to the docked panel. Positioned in
+   JS (positionCommentNotch); base sits on the panel's top edge, tip points up
+   at the row. A standalone fixed element because the panel's overflow:auto
+   would clip a pseudo poking out its top. */
+.comment-notch {
+  position: fixed;
+  z-index: 202;                        /* above the row ring and the panel */
+  width: 0;
+  height: 0;
+  border-left: 14px solid transparent;
+  border-right: 14px solid transparent;
+  border-bottom: 14px solid #e94560;   /* points up — wider/taller so it welds row→panel */
+  transform: translate(-50%, -100%);   /* center on x; sit its base on panelTop */
+  margin-top: 2px;                     /* nudge the base down into the panel so it reads continuous */
+}
+
+/* "Archived ↓" toast — quick dark pill flashed beside the archive button when a
+   movie is archived; the bouncing arrow shows it dropped to the Archived
+   section below. Positioned in JS (flashArchivedToast), anchored just left of
+   the button via the translate below. */
+.archived-toast {
+  position: fixed;
+  z-index: 400;
+  transform: translate(-100%, -50%);
+  background: #2b2f3a;
+  color: #ffffff;
+  padding: 6px 12px;
+  border-radius: 16px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  pointer-events: none;                /* never intercepts clicks */
+}
+
+.archived-toast-show { opacity: 1; }
+
+.archived-toast-arrow {
+  display: inline-block;
+  margin-left: 3px;
+  font-size: 15px;
+  color: #e94560;                      /* accent so the direction pops */
+  animation: archived-bounce 0.5s ease-in-out infinite alternate;
+}
+
+@keyframes archived-bounce {
+  from { transform: translateY(-2px); }
+  to   { transform: translateY(3px); }
 }
 
 .comment-expanded.comment-readonly {
@@ -1572,6 +1634,7 @@ html, body {
 .comment-edit {
   flex: 1;
   width: 100%;
+  min-height: 110px;           /* keep a usable typing area now that the panel sizes to content */
   font-size: 18px;
   padding: 8px;
   border: 1px solid #bbb;

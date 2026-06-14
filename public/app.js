@@ -186,7 +186,8 @@ function initApp() {
   /* Deep link to a specific comment: ?Movie=<id>&Comment=<visitorId>. Stash
      it; fired once after the first render (see the loadList .then below). */
   if (movieParam && /^\d+$/.test(movieParam)
-      && commentParam && /^[A-Za-z0-9]{10}$/.test(commentParam)) {
+      && commentParam
+      && (/^\d{1,2}$/.test(commentParam) || /^[A-Za-z0-9]{10}$/.test(commentParam))) {
     pendingDeepLink = { movieId: parseInt(movieParam, 10), visitorId: commentParam };
   }
 
@@ -1535,7 +1536,8 @@ function openDeepLinkComment(movieId, commentRef) {
     + '[data-visitor-id="' + visitorId + '"]'
   );
   if (!box) return;
-  box.scrollIntoView({ block: 'center' });
+  /* Scrolling is centralized in expandComment/dockCommentToRow so tap and
+     deep-link land identically — no scrollIntoView here. */
   expandComment(movieId, visitorId);
 }
 
@@ -1570,6 +1572,60 @@ function makeCommentLinkBtn(movieId, commentVisitorId) {
   return btn;
 }
 
+/* Scroll the movie row that owns this comment to the top of the list (just
+   below the sticky header), then override --modal-top so the modal docks right
+   under the row's bottom edge. Keeps --modal-left/--modal-width from
+   applyViewportLayout (centered 80%) — only the top moves. Must run AFTER
+   .comment-expanded is applied: the box is position:fixed by then, so it's out
+   of flow and the row's measurements (height, bottom) reflect just the row. */
+function dockCommentToRow(box) {
+  const entry = box.closest('.entry');                              // the movie row
+  if (!entry) return;
+
+  const gap = 2;                                                    // snug gap, header→row and row→modal
+  const headerH = document.getElementById('frozen-top').offsetHeight;
+
+  /* Pull the row up so its top sits just below the sticky header. Instant
+     scroll (not smooth) so the bottom measurement below is accurate right now.
+     Clamp to >= 0 so we never scroll past the top of the page. */
+  const rowTop = entry.getBoundingClientRect().top + window.scrollY;
+  const target = Math.max(0, rowTop - headerH - gap);
+  window.scrollTo({ top: target, behavior: 'auto' });
+
+  /* Keep the owning row lit above the backdrop — everything else dims, this row
+     stays bright and accent-ringed, so it's unmistakable which movie owns the
+     comment (see .comment-source-row). */
+  entry.classList.add('comment-source-row');
+
+  /* Dock the modal just below the row. getBoundingClientRect().bottom is in
+     viewport coords, which is what position:fixed top wants. If the row is near
+     the list bottom and couldn't fully reach the top, this still lands right. */
+  const rect = entry.getBoundingClientRect();
+  const panelTop = rect.bottom + gap;
+  box.style.setProperty('--modal-top', panelTop + 'px');
+
+  /* Bridge the row and the panel with an upward notch. It's a standalone fixed
+     element, not a pseudo on the panel: the panel has overflow:auto, which
+     clips anything poking out its top edge. */
+  positionCommentNotch(box, panelTop);
+}
+
+/* Place (or move) the little accent triangle that connects the docked panel up
+   to its movie row. Centered on the panel, its base sitting on the panel's top
+   edge so the tip points up at the lit row just above. */
+function positionCommentNotch(box, panelTop) {
+  let notch = document.querySelector('.comment-notch');
+  if (!notch) {
+    notch = document.createElement('div');
+    notch.className = 'comment-notch';
+    document.body.appendChild(notch);
+  }
+  const left  = parseFloat(box.style.getPropertyValue('--modal-left'))  || 0;
+  const width = parseFloat(box.style.getPropertyValue('--modal-width')) || box.offsetWidth;
+  notch.style.left = (left + width / 2) + 'px';
+  notch.style.top  = panelTop + 'px';
+}
+
 function expandComment(movieId, commentVisitorId) {
   expandedComment = { movieId: movieId, visitorId: commentVisitorId };
 
@@ -1592,6 +1648,10 @@ function expandComment(movieId, commentVisitorId) {
   applyViewportLayout(box);
   if (commentUnbindWidth) commentUnbindWidth();
   commentUnbindWidth = bindViewportWidthTracking(box);
+
+  /* Scroll the owning movie row to the top (just below the sticky header) and
+     dock the modal right under it, so the comment visibly belongs to the row. */
+  dockCommentToRow(box);
 
   const isOurs = (commentVisitorId === visitorId);
 
@@ -1645,6 +1705,12 @@ function collapseComment() {
 
   const backdrop = document.querySelector('.comment-backdrop');
   if (backdrop) backdrop.remove();
+
+  /* drop the lit-row highlight and the bridging notch */
+  const srcRow = document.querySelector('.comment-source-row');
+  if (srcRow) srcRow.classList.remove('comment-source-row');
+  const notch = document.querySelector('.comment-notch');
+  if (notch) notch.remove();
 
   if (commentUnbindWidth) { commentUnbindWidth(); commentUnbindWidth = null; }
 
@@ -2616,6 +2682,27 @@ async function archiveMovie(movieId, archived) {
   await loadList();
 }
 
+/* Quick "Archived ↓" toast next to the clicked archive button — the bouncing
+   down-arrow shows the movie just dropped to the Archived section below. Lives
+   on <body> so it survives the loadList() re-render, then fades itself out. */
+function flashArchivedToast(anchorEl) {
+  const toast = document.createElement('div');
+  toast.className = 'archived-toast';
+  toast.innerHTML = 'Archived <span class="archived-toast-arrow">↓</span>';
+  document.body.appendChild(toast);
+
+  /* sit just left of the archive button, vertically centered on it */
+  const r = anchorEl.getBoundingClientRect();
+  toast.style.top  = (r.top + r.height / 2) + 'px';
+  toast.style.left = (r.left - 8) + 'px';
+
+  requestAnimationFrame(() => toast.classList.add('archived-toast-show'));
+  setTimeout(() => {
+    toast.classList.remove('archived-toast-show');
+    setTimeout(() => toast.remove(), 300);                         // after the fade-out transition
+  }, 1100);
+}
+
 
 /* ============================================================================
    SECTION 14: UTILITY FUNCTIONS
@@ -2854,6 +2941,7 @@ function setupEventListeners() {
     /* ARCHIVE / UNARCHIVE BUTTONS */
     const archiveBtn = e.target.closest('.archive-btn');
     if (archiveBtn) {
+      flashArchivedToast(archiveBtn);                              // "Archived ↓" cue before the row drops
       archiveMovie(parseInt(archiveBtn.dataset.movieId), true);
       return;
     }
@@ -3993,6 +4081,7 @@ function setupShelfEventListeners () {
     const archL = e.target.closest('.shelf-archive-btn');
     if (archL) {
       e.stopPropagation();
+      flashArchivedToast(archL);                                  // "Archived ↓" cue before the row drops
       shelfArchiveList(archL.dataset.listId, parseInt(archL.dataset.movieId), true);
       return;
     }
@@ -4056,6 +4145,7 @@ function setupShelfEventListeners () {
     const archK = e.target.closest('.shelf-archive-key-btn');
     if (archK) {
       e.stopPropagation();
+      flashArchivedToast(archK);                                  // "Archived ↓" cue before the row drops
       shelfArchiveKey(parseInt(archK.dataset.tmdbId), archK.dataset.mediaType, true);
       return;
     }
