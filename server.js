@@ -35,6 +35,7 @@
 const express = require('express');
 const Database = require('better-sqlite3');
 const path = require('path');
+const fs = require('fs');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -593,6 +594,8 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public'), {
   etag: false,
   maxAge: 0,
+  index: false,                  // let "/" fall through to the catch-all so
+                                 // comment deep-links can get a dynamic <title>
   setHeaders: (res, filePath) => {
     if (filePath.endsWith('.html')) {
       res.setHeader('Cache-Control', 'no-store');
@@ -2176,11 +2179,73 @@ app.put('/api/list/:id/comments', (req, res) => {
    SECTION 12: CATCH-ALL ROUTE — serve index.html for any unknown path
    ============================================================================ */
 
+const INDEX_PATH = path.join(__dirname, 'public', 'index.html');
+
+/* Collapse whitespace and clip a comment to `max` chars for use as a page
+   title. Trims a trailing partial word and appends an ellipsis when cut. */
+function commentExcerpt(text, max) {
+  const flat = String(text).replace(/\s+/g, ' ').trim();
+  if (flat.length <= max) return flat;
+  const cut = flat.slice(0, max);
+  const lastSpace = cut.lastIndexOf(' ');
+  return (lastSpace > max * 0.6 ? cut.slice(0, lastSpace) : cut).trimEnd() + '…';
+}
+
+function htmlEscape(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/* For a comment deep-link (?ListId&Movie&Comment), look up the comment text
+   so the page <title> / OG tags become the comment itself. This is the only
+   way link unfurlers (iMessage, Google Messages, etc.) can show the comment —
+   they fetch raw HTML and never run app.js. Returns null for any non-deep-link
+   request or if the comment can't be resolved (falls back to default title). */
+function commentDeepLinkTitle(query) {
+  const listId    = query.ListId;
+  const movieId   = query.Movie;
+  const visitorId = query.Comment;
+  if (!listId || !movieId || !visitorId) return null;
+  try {
+    const slotRow = db.prepare(
+      'SELECT slot FROM list_visitors WHERE list_id = ? AND visitor_id = ?'
+    ).get(listId, visitorId);
+    if (!slotRow) return null;
+    const col = 'user' + slotRow.slot + '_comment';
+    const row = db.prepare(
+      'SELECT ' + col + ' AS comment FROM movies WHERE id = ? AND list_id = ?'
+    ).get(movieId, listId);
+    if (!row || !row.comment || !row.comment.trim()) return null;
+    return commentExcerpt(row.comment, 80);
+  } catch (e) {
+    return null;
+  }
+}
+
 app.get('*', (req, res) => {
-  /* Same no-store as the static handler — this route fires for list-ID
-     URLs like /Ab3xPq9K and must never be cached by the browser. */
+  /* Same no-store as the static handler — this route fires for "/" and for
+     list-ID URLs like /Ab3xPq9K and must never be cached by the browser. */
   res.setHeader('Cache-Control', 'no-store');
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+
+  const commentTitle = commentDeepLinkTitle(req.query);
+  if (!commentTitle) {
+    return res.sendFile(INDEX_PATH);
+  }
+
+  /* Swap the generic <title> for the comment text and add matching OG/Twitter
+     tags so the unfurl preview shows the comment. */
+  const t = htmlEscape(commentTitle);
+  const metaBlock =
+      '<title>' + t + '</title>\n'
+    + '  <meta property="og:title" content="' + t + '">\n'
+    + '  <meta property="og:type" content="website">\n'
+    + '  <meta name="twitter:card" content="summary">';
+  const html = fs.readFileSync(INDEX_PATH, 'utf8')
+    .replace(/<title>[^<]*<\/title>/, metaBlock);
+  res.type('html').send(html);
 });
 
 
