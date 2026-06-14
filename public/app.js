@@ -1522,27 +1522,46 @@ let commentUnbindWidth = null;
 /* Deep-link entry point: find the target row, bring it into view behind the
    backdrop, then open its comment modal. No-op if the row/comment isn't on
    this list (e.g. deleted since the link was made). */
-function openDeepLinkComment(movieId, commentVisitorId) {
+function openDeepLinkComment(movieId, commentRef) {
+  /* commentRef is a slot number (new links) or a legacy visitor_id. Resolve a
+     slot to its visitor_id; the comment box is keyed by data-visitor-id. */
+  let visitorId = commentRef;
+  if (/^\d{1,2}$/.test(String(commentRef))
+      && listData && listData.visitors && listData.visitors[commentRef]) {
+    visitorId = listData.visitors[commentRef].id;
+  }
   const box = document.querySelector(
     '.comment-box[data-movie-id="' + movieId + '"]'
-    + '[data-visitor-id="' + commentVisitorId + '"]'
+    + '[data-visitor-id="' + visitorId + '"]'
   );
   if (!box) return;
   box.scrollIntoView({ block: 'center' });
-  expandComment(movieId, commentVisitorId);
+  expandComment(movieId, visitorId);
 }
 
 /* Small blue "🔗 link" button for the expanded comment modal. Copies a deep
    link that reopens this exact comment. Host-relative, so it points at
    whatever domain you're on (test vs prod). */
+/* slot (1-10) for a visitor on the current list, or null. listData.visitors
+   is keyed by slot. */
+function slotForVisitor(visitorId) {
+  const entry = Object.entries((listData && listData.visitors) || {})
+    .find(([, v]) => v.id === visitorId);
+  return entry ? entry[0] : null;
+}
+
 function makeCommentLinkBtn(movieId, commentVisitorId) {
   const btn = document.createElement('button');
   btn.className = 'comment-link-btn';
   btn.innerHTML = '🔗 link';
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
+    /* Reference the comment by slot, NOT visitor_id — the visitor_id is the
+       identity cookie, so it must never travel in a shareable link. */
+    const slot = slotForVisitor(commentVisitorId);
+    const commentRef = slot != null ? slot : commentVisitorId;   // legacy fallback
     const url = window.location.origin + '/?ListId=' + listId
-      + '&Movie=' + movieId + '&Comment=' + commentVisitorId;
+      + '&Movie=' + movieId + '&Comment=' + commentRef;
     navigator.clipboard.writeText(url).then(() => {
       btn.textContent = '✓ copied';
       setTimeout(() => { btn.innerHTML = '🔗 link'; }, 1500);

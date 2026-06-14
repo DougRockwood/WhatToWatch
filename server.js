@@ -2205,16 +2205,25 @@ function htmlEscape(s) {
    they fetch raw HTML and never run app.js. Returns null for any non-deep-link
    request or if the comment can't be resolved (falls back to default title). */
 function commentDeepLinkTitle(query) {
-  const listId    = query.ListId;
-  const movieId   = query.Movie;
-  const visitorId = query.Comment;
-  if (!listId || !movieId || !visitorId) return null;
+  const listId  = query.ListId;
+  const movieId = query.Movie;
+  const ref     = query.Comment;   // slot number (1-10), or a legacy visitor_id
+  if (!listId || !movieId || !ref) return null;
   try {
-    const slotRow = db.prepare(
-      'SELECT slot FROM list_visitors WHERE list_id = ? AND visitor_id = ?'
-    ).get(listId, visitorId);
-    if (!slotRow) return null;
-    const col = 'user' + slotRow.slot + '_comment';
+    /* Resolve `ref` to a slot. New links carry the slot directly (we don't
+       want to leak visitor_ids — they double as the identity cookie). Old
+       links carry a 10-char visitor_id; look its slot up for backcompat. */
+    let slot;
+    if (/^\d{1,2}$/.test(ref) && +ref >= 1 && +ref <= 10) {
+      slot = +ref;
+    } else {
+      const slotRow = db.prepare(
+        'SELECT slot FROM list_visitors WHERE list_id = ? AND visitor_id = ?'
+      ).get(listId, ref);
+      if (!slotRow) return null;
+      slot = slotRow.slot;
+    }
+    const col = 'user' + slot + '_comment';
     const row = db.prepare(
       'SELECT ' + col + ' AS comment FROM movies WHERE id = ? AND list_id = ?'
     ).get(movieId, listId);
