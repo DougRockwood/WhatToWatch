@@ -1578,18 +1578,37 @@ function makeCommentLinkBtn(movieId, commentVisitorId) {
    applyViewportLayout (centered 80%) — only the top moves. Must run AFTER
    .comment-expanded is applied: the box is position:fixed by then, so it's out
    of flow and the row's measurements (height, bottom) reflect just the row. */
+const COMMENT_DOCK_GAP = 2;       // snug gap between the row and the docked panel
+let preCommentScrollY = 0;        // scroll position before docking, restored on close
+let commentDockUnbind = null;     // tears down the scroll/resize tracking on close
+
 function dockCommentToRow(box) {
   const entry = box.closest('.entry');                              // the movie row
   if (!entry) return;
 
-  const gap = 2;                                                    // snug gap, header→row and row→modal
   const headerH = document.getElementById('frozen-top').offsetHeight;
+
+  /* Remember where the user was so collapseComment can scroll back. */
+  preCommentScrollY = window.scrollY;
+
+  /* Add temporary empty space below the list so even the LAST row can scroll up
+     under the header — without it the page can't scroll far enough and a
+     bottom/archived row's docked panel would fall off the screen. The backdrop
+     dims this space, so it reads as gray screen below the row. Removed on close.
+     A viewport's worth is always enough for any single row to reach the top. */
+  let spacer = document.querySelector('.comment-scroll-spacer');
+  if (!spacer) {
+    spacer = document.createElement('div');
+    spacer.className = 'comment-scroll-spacer';
+    document.body.appendChild(spacer);
+  }
+  spacer.style.height = window.innerHeight + 'px';
 
   /* Pull the row up so its top sits just below the sticky header. Instant
      scroll (not smooth) so the bottom measurement below is accurate right now.
      Clamp to >= 0 so we never scroll past the top of the page. */
   const rowTop = entry.getBoundingClientRect().top + window.scrollY;
-  const target = Math.max(0, rowTop - headerH - gap);
+  const target = Math.max(0, rowTop - headerH - COMMENT_DOCK_GAP);
   window.scrollTo({ top: target, behavior: 'auto' });
 
   /* Keep the owning row lit above the backdrop — everything else dims, this row
@@ -1597,16 +1616,30 @@ function dockCommentToRow(box) {
      comment (see .comment-source-row). */
   entry.classList.add('comment-source-row');
 
-  /* Dock the modal just below the row. getBoundingClientRect().bottom is in
-     viewport coords, which is what position:fixed top wants. If the row is near
-     the list bottom and couldn't fully reach the top, this still lands right. */
-  const rect = entry.getBoundingClientRect();
-  const panelTop = rect.bottom + gap;
-  box.style.setProperty('--modal-top', panelTop + 'px');
+  /* Dock the panel under the row, then keep it there as the user scrolls. The
+     panel is position:fixed, so without live tracking it would stay put while
+     the row scrolls away (and undock). repositionDock re-pins --modal-top and
+     the notch to the row's current position on every scroll / zoom. */
+  repositionDock(box, entry);
 
-  /* Bridge the row and the panel with an upward notch. It's a standalone fixed
-     element, not a pseudo on the panel: the panel has overflow:auto, which
-     clips anything poking out its top edge. */
+  if (commentDockUnbind) commentDockUnbind();
+  const onMove = () => repositionDock(box, entry);
+  window.addEventListener('scroll', onMove, { passive: true });
+  const vv = window.visualViewport;
+  if (vv) { vv.addEventListener('scroll', onMove); vv.addEventListener('resize', onMove); }
+  commentDockUnbind = () => {
+    window.removeEventListener('scroll', onMove);
+    if (vv) { vv.removeEventListener('scroll', onMove); vv.removeEventListener('resize', onMove); }
+    commentDockUnbind = null;
+  };
+}
+
+/* Pin the docked panel (and its notch) to the owning row's live position.
+   getBoundingClientRect().bottom is in viewport coords — exactly what a
+   position:fixed top wants. Runs at open and on every scroll/zoom. */
+function repositionDock(box, entry) {
+  const panelTop = entry.getBoundingClientRect().bottom + COMMENT_DOCK_GAP;
+  box.style.setProperty('--modal-top', panelTop + 'px');
   positionCommentNotch(box, panelTop);
 }
 
@@ -1711,6 +1744,13 @@ function collapseComment() {
   if (srcRow) srcRow.classList.remove('comment-source-row');
   const notch = document.querySelector('.comment-notch');
   if (notch) notch.remove();
+
+  /* stop tracking the row, remove the temp bottom spacer, and scroll back to
+     where we were so the gray space below the row disappears. */
+  if (commentDockUnbind) commentDockUnbind();
+  const spacer = document.querySelector('.comment-scroll-spacer');
+  if (spacer) spacer.remove();
+  window.scrollTo({ top: preCommentScrollY, behavior: 'auto' });
 
   if (commentUnbindWidth) { commentUnbindWidth(); commentUnbindWidth = null; }
 
