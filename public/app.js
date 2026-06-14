@@ -2065,7 +2065,7 @@ function hideMoviePopup() {
 /* ============================================================================
    Popup sizing — visualViewport-aware (shared by every popup)
    ============================================================================
-   Consumers: .modal-content (How-to + shelf Manage + multi-X confirm),
+   Consumers: .modal-content (How-to + shelf Manage),
    .popup-content (poster info), .comment-expanded (comment editor),
    .shelf-note-expanded (shelf note editor). All use the same three CSS
    vars — --modal-top, --modal-left, --modal-width — set on the element
@@ -3049,7 +3049,7 @@ function renderShelfHowToBody(modal) {
     + 'tap again to force all lists <span class="howto-mini howto-mini-naw">Naw</span>.</p>'
 
     + '<p>Tap <span class="howto-mini howto-mini-action howto-mini-move">Move</span> '
-    + 'to view/edit raw data, or to bulk copy or remove movies from lists.</p>'
+    + 'to view/edit raw data, or to bulk copy movies to lists.</p>'
 
     + '<p>Tap <span class="howto-mini howto-mini-action howto-mini-allbtn">All</span> '
     + 'to select all movies on the current list; tap again to clear all selections.</p>'
@@ -4145,10 +4145,6 @@ function setupShelfEventListeners () {
                                        (checked dest-list checkboxes).
      - RIGHT — destination-list checkboxes (incl. the visitor's solo list,
                labeled "Solo (only you)"). Default unchecked.
-
-   The user-tab X (the per-movie multi-list confirm) is rendered separately
-   in openShelfMultiRemove() further down — same #copy-paste-modal slot,
-   different markup.
    ============================================================================ */
 
 function openShelfManageModal () {
@@ -4179,10 +4175,8 @@ function openShelfManageModal () {
 
   modal.querySelector('#manage-btn-user').addEventListener('click', shelfManageChangeUser);
   modal.querySelector('#manage-btn-lists').addEventListener('click', shelfManageAddCouchlists);
-  const copyBtn   = modal.querySelector('#manage-btn-copy');
-  const removeBtn = modal.querySelector('#manage-btn-remove');
-  if (copyBtn)   copyBtn.addEventListener('click', shelfManageCopy);
-  if (removeBtn) removeBtn.addEventListener('click', shelfManageRemove);
+  const copyBtn = modal.querySelector('#manage-btn-copy');
+  if (copyBtn) copyBtn.addEventListener('click', shelfManageCopy);
 
   refreshDestToggleLabel();
   alignManageButtons();
@@ -4215,11 +4209,10 @@ function renderManageModalHtml () {
       + '</label>';
   }).join('');
 
-  /* Movie-action buttons only render when there's a selection — otherwise
-     the middle column shows just Change User and Add Couchlists. */
+  /* The Copy button only renders when there's a selection — otherwise the
+     middle column shows just Change User and Add Couchlists. */
   const movieBtns = hasMovies
-    ? '<button id="manage-btn-copy"   class="manage-col-btn">Copy movies to selected lists</button>'
-    + '<button id="manage-btn-remove" class="manage-col-btn">Remove movies from selected lists</button>'
+    ? '<button id="manage-btn-copy" class="manage-col-btn">Copy movies to selected lists</button>'
     : '';
 
   return ''
@@ -4265,8 +4258,7 @@ function alignManageButtons () {
      flow naturally — clear any leftover absolute positioning. */
   const stacked = window.getComputedStyle(grid).gridTemplateColumns
     .split(' ').filter(Boolean).length < 3;
-  const ids = ['manage-btn-user', 'manage-btn-lists',
-               'manage-btn-copy', 'manage-btn-remove'];
+  const ids = ['manage-btn-user', 'manage-btn-lists', 'manage-btn-copy'];
   if (stacked) {
     ids.forEach(id => {
       const b = document.getElementById(id);
@@ -4296,8 +4288,7 @@ function alignManageButtons () {
   place('manage-btn-user',  yOf(idxUser   >= 0 ? idxUser   : 1));
   place('manage-btn-lists', yOf(idxLists  >= 0 ? idxLists  : 5));
   if (idxMovies >= 0) {
-    place('manage-btn-copy',   yOf(idxMovies));
-    place('manage-btn-remove', yOf(idxMovies) + 36);
+    place('manage-btn-copy', yOf(idxMovies));
   }
 }
 
@@ -4462,52 +4453,6 @@ async function shelfManageCopy () {
   await loadShelf();
 }
 
-async function shelfManageRemove () {
-  const dests = getSelectedDestListIds();
-  if (dests.length === 0) { alert('Pick at least one list to remove from.'); return; }
-
-  const movies = getSelectedShelfMovies();
-  if (movies.length === 0) { alert('No movies selected.'); return; }
-
-  /* Build the (movie, list, movie_id) work items. Per spec we only remove
-     movies the visitor was the adder of; show others with strikethrough. */
-  const work = [];                                                  // eligible removes
-  const skipped = [];                                               // others
-  movies.forEach(m => {
-    dests.forEach(lid => {
-      const e = m.list_entries.find(le => le.list_id === lid);
-      if (!e) return;                                               // not on this list
-      if (e.added_here) work.push({ movie: m, list_id: lid, movie_id: e.movie_id });
-      else skipped.push({ movie: m, list_id: lid });
-    });
-  });
-
-  if (work.length === 0) {
-    alert('Nothing to remove (you can only remove movies you added).');
-    return;
-  }
-
-  const lines = [];
-  lines.push('Remove these?');
-  work.forEach(w => lines.push('  ✕ ' + w.movie.title + '  →  ' + w.list_id));
-  if (skipped.length) {
-    lines.push('');
-    lines.push('Skipped (added by someone else):');
-    skipped.forEach(s => lines.push('  – ' + s.movie.title + '  on  ' + s.list_id));
-  }
-  if (!confirm(lines.join('\n'))) return;
-
-  for (const w of work) {
-    await fetch(API + '/list/' + w.list_id + '/movies/' + w.movie_id, {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ visitor_id: visitorId })
-    });
-  }
-  closeShelfManageModal();
-  await loadShelf();
-}
-
 /* Read the currently-edited blob from the textarea. Both Change User and
    Add Couchlists work off this — so the user can edit lines (e.g. paste
    in a different ID) before clicking. */
@@ -4588,77 +4533,6 @@ async function shelfManageAddCouchlists () {
   closeShelfManageModal();
   await loadShelf();
 }
-
-/* ----------------------------------------------------------------------------
-   User-tab X-to-remove popup. Browser-native confirm wrapped in a synthetic
-   overlay so we can show the full list of lists with RDY-default checkboxes.
-   ---------------------------------------------------------------------------- */
-function openShelfMultiRemove (tmdb_id, media_type) {
-  const movie = shelfData.movies.find(m =>
-    m.tmdb_id === tmdb_id && m.media_type === media_type);
-  if (!movie) return;
-  /* lists where this user is the adder AND that exist on this movie's entries */
-  const removable = movie.list_entries.filter(le => le.added_here);
-  if (removable.length === 0) {
-    alert('You did not add this movie on any list, so you can\'t remove it.');
-    return;
-  }
-
-  /* Build a small inline confirm dialog. Reuse #copy-paste-modal as the
-     overlay since it's already a fullscreen-style modal slot. */
-  const modal = document.getElementById('copy-paste-modal');
-  const rows = removable.map(le => {
-    const lst = shelfData.lists.find(l => l.id === le.list_id);
-    const isRdy = lst ? lst.ready : false;
-    const label = (lst && lst.list_name && lst.list_name.trim())
-      ? lst.list_name + ' (' + le.list_id + ')'
-      : le.list_id;
-    return '<label class="multi-x-row">'
-      + '<input type="checkbox" class="multi-x-cb" '
-        + 'data-list-id="' + escapeHtml(le.list_id) + '" '
-        + 'data-movie-id="' + le.movie_id + '"'
-        + (isRdy ? ' checked' : '') + '>'
-      + '<span>' + escapeHtml(label) + (isRdy ? ' <em>Rdy</em>' : '') + '</span>'
-      + '</label>';
-  }).join('');
-
-  modal.innerHTML =
-      '<div class="modal-content shelf-manage-modal">'
-    +   '<button class="modal-close" aria-label="Close">✕</button>'
-    +   '<h3 class="manage-title">Remove "' + escapeHtml(movie.title) + '"</h3>'
-    +   '<p class="manage-hint">RDY lists are pre-selected. Confirm to remove from each checked list.</p>'
-    +   '<div class="multi-x-list">' + rows + '</div>'
-    +   '<div class="manage-actions">'
-    +     '<button id="multi-x-confirm">Remove from checked lists</button>'
-    +     '<button id="multi-x-cancel" class="manage-mini-btn">Cancel</button>'
-    +   '</div>'
-    + '</div>';
-  modal.style.display = 'block';
-  const content = modal.querySelector('.modal-content');
-  applyViewportLayout(content);
-
-  modal.querySelector('.modal-close').addEventListener('click', () => {
-    modal.style.display = 'none'; modal.innerHTML = '';
-  });
-  modal.querySelector('#multi-x-cancel').addEventListener('click', () => {
-    modal.style.display = 'none'; modal.innerHTML = '';
-  });
-  modal.querySelector('#multi-x-confirm').addEventListener('click', async () => {
-    const picks = Array.from(modal.querySelectorAll('.multi-x-cb'))
-      .filter(cb => cb.checked)
-      .map(cb => ({ list_id: cb.dataset.listId, movie_id: parseInt(cb.dataset.movieId) }));
-    modal.style.display = 'none'; modal.innerHTML = '';
-    for (const p of picks) {
-      await fetch(API + '/list/' + p.list_id + '/movies/' + p.movie_id, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ visitor_id: visitorId })
-      });
-    }
-    await loadShelf();
-  });
-}
-
 
 /* ============================================================================
    SECTION 17: STARTUP
