@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>System Prompts on Lucy's Local LLM — LM Studio guide</title>
+<style>
+  :root {
+    --bg: #14161a; --card: #1c1f26; --ink: #e6e8ec; --muted: #9aa3af;
+    --accent: #6ea8fe; --warn: #ffcc66; --good: #7ee0a0; --line: #2a2e37;
+    --code-bg: #0f1115;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0 16px 64px;
+    background: var(--bg); color: var(--ink);
+    font: 16px/1.6 -apple-system, "Segoe UI", Roboto, sans-serif;
+    max-width: 760px; margin-inline: auto;
+  }
+  header { padding: 28px 0 8px; }
+  h1 { font-size: 1.5rem; line-height: 1.25; margin: 0 0 6px; }
+  .sub { color: var(--muted); font-size: .95rem; margin: 0; }
+  h2 {
+    font-size: 1.18rem; margin: 34px 0 10px; padding-top: 14px;
+    border-top: 1px solid var(--line);
+  }
+  h2 .n {
+    display: inline-block; min-width: 1.6em; color: var(--accent);
+    font-variant-numeric: tabular-nums;
+  }
+  h3 { font-size: 1.02rem; margin: 20px 0 6px; color: var(--accent); }
+  p { margin: 10px 0; }
+  code {
+    background: var(--code-bg); padding: 1px 6px; border-radius: 5px;
+    font: .88em/1.5 "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    color: #d7dbe2;
+  }
+  pre {
+    background: var(--code-bg); border: 1px solid var(--line);
+    border-radius: 8px; padding: 12px 14px; overflow-x: auto;
+    font: .84rem/1.55 "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  }
+  pre code { background: none; padding: 0; }
+  .card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 10px; padding: 2px 16px 14px; margin: 14px 0;
+  }
+  .tag {
+    display: inline-block; font-size: .72rem; letter-spacing: .04em;
+    text-transform: uppercase; padding: 2px 8px; border-radius: 20px;
+    margin: 12px 0 2px;
+  }
+  .tag.you { background: #24384f; color: var(--accent); }
+  .tag.tmpl { background: #3a3320; color: var(--warn); }
+  .tag.tools { background: #4a2530; color: #ff9db0; }
+  .callout {
+    border-left: 3px solid var(--warn); background: #221f16;
+    padding: 10px 14px; border-radius: 0 8px 8px 0; margin: 14px 0;
+  }
+  .callout.gotcha { border-color: #ff7a90; background: #241619; }
+  .callout b { color: var(--warn); }
+  .callout.gotcha b { color: #ff9db0; }
+  ol, ul { margin: 8px 0; padding-left: 22px; }
+  li { margin: 5px 0; }
+  .path { color: var(--good); }
+  footer { margin-top: 40px; color: var(--muted); font-size: .82rem;
+           border-top: 1px solid var(--line); padding-top: 14px; }
+  kbd {
+    background: #2a2e37; border: 1px solid #3a3f4a; border-bottom-width: 2px;
+    border-radius: 5px; padding: 1px 6px; font-size: .82em;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>System prompts on Lucy's local LLM</h1>
+  <p class="sub">LM Studio 0.4.16 · Qwen3.6&#8209;35B&#8209;A3B · a read/edit guide for when you're at the machine</p>
+</header>
+
+<p>"The system prompt" on a local model is actually <b>three layers stacked on top of
+each other</b>. Only one of them is the box you type in — the other two explain the
+weird stuff (why it ignores you, why it always starts thinking). Here's all three.</p>
+
+<div class="card">
+  <p style="margin-top:14px"><b>What a system prompt even is:</b> not a config file, not
+  magic. The model eats one long list of messages, each tagged with a <b>role</b> —
+  <code>system</code>, <code>user</code>, <code>assistant</code>. The system message is
+  just the <i>first</i> one, and by convention it's where the persona / rules go. Qwen
+  wraps it in "ChatML" fence tokens before feeding it in:</p>
+<pre><code>&lt;|im_start|&gt;system
+You are a terse coding assistant.&lt;|im_end|&gt;
+&lt;|im_start|&gt;user
+hey&lt;|im_end|&gt;
+&lt;|im_start|&gt;assistant</code></pre>
+  <p>LM Studio re&#8209;prepends your system text on <i>every</i> turn automatically —
+  that's why it "sticks" through the whole chat.</p>
+</div>
+
+<h2><span class="n">1</span> Your system prompt <span class="tag you">the one you edit</span></h2>
+<p>This is the one you mean 95% of the time. On Lucy, in LM Studio:</p>
+<ol>
+  <li>Open the <b>Chat</b> tab (💬, left rail).</li>
+  <li>Look at the <b>right&#8209;hand sidebar</b> — the <b>"System Prompt"</b> field is right
+      at the top of the settings panel. That text box <i>is</i> your system prompt.</li>
+  <li>Type/edit it there. It applies to the next message immediately.</li>
+</ol>
+<p>To stop retyping it every session, save the whole config as a <b>Preset</b>
+(dropdown at the top of the chat) and reload it later.</p>
+
+<h2><span class="n">2</span> The baked&#8209;in chat template <span class="tag tmpl">explains the thinking</span></h2>
+<p>The ChatML structure above lives <i>inside</i> the GGUF model file — that's the
+"chat template." One quirk it forces on this model:</p>
+<div class="callout">
+  <b>It auto&#8209;opens a <code>&lt;think&gt;</code> block at the start of every reply.</b>
+  Qwen3.6 is a reasoning model — the thinking is template&#8209;level, not something in
+  your system prompt. Toggle <b><code>enable_thinking</code></b> off in the load settings
+  to suppress it: faster, but weaker on hard problems.
+</div>
+<p>To actually <i>see or override</i> the template: <b>My Models</b> tab → gear on the
+Qwen model → <b>Prompt Template / Jinja</b> override. Leave it alone unless you have a
+reason — a wrong template breaks output entirely.</p>
+
+<h2><span class="n">3</span> The hidden tool&#8209;calling preamble <span class="tag tools">the gotcha</span></h2>
+<div class="callout gotcha">
+  <b>When tool&#8209;calling is ON, LM Studio silently injects a big
+  <code>#&nbsp;Tools — You have access to the following functions…</code> block
+  <i>ahead of your own system message</i>.</b> So if you set a system prompt and the model
+  seems to <i>ignore</i> it — that's usually why. It's not ignoring you; your text is just
+  buried under the tools preamble. Turn tools off and your system prompt regains its punch.
+</div>
+
+<h2><span class="n">4</span> See exactly what's being sent</h2>
+<p>Best way to demystify all three layers at once: LM Studio's
+<b>Developer / verbose logging</b> (Developer tab, or the app logs). Turn it on and it
+prints the <b>fully&#8209;rendered prompt</b> sent to the model each turn — your system text,
+the ChatML fences, and any tools preamble, all assembled. Great for learning what's really
+going on under the hood.</p>
+
+<h2><span class="n">5</span> The API route (no GUI)</h2>
+<p>Since you code: if you flip on LM Studio's <b>local server</b> (Developer tab →
+start server, OpenAI&#8209;compatible), the system prompt is just the first element of the
+<code>messages</code> array — same concept, per request, driveable from any machine
+pointed at Lucy:</p>
+<pre><code>{
+  "model": "qwen/qwen3.6-35b-a3b",
+  "messages": [
+    { "role": "system", "content": "You are terse." },
+    { "role": "user",   "content": "hey" }
+  ]
+}</code></pre>
+<p>Default endpoint is <code>http://&lt;lucy-ip&gt;:1234/v1/chat/completions</code>.</p>
+
+<div class="callout">
+  <b>Quick reference — the model on Lucy:</b><br>
+  Path: <span class="path">~/.lmstudio/models/lmstudio-community/Qwen3.6-35B-A3B-GGUF/Qwen3.6-35B-A3B-Q4_K_M.gguf</span><br>
+  35B total / 3B active MoE · Q4_K_M (~21 GB) · runs the Lane&#8209;2 RAM&#8209;offload play
+  (experts in system RAM, non&#8209;expert layers + KV cache on the 8&nbsp;GB GPU).
+  There's also an 861&nbsp;MB <code>mmproj</code> vision projector alongside it —
+  unplanned image&#8209;input capability worth poking at.
+</div>
+
+<footer>
+  Built for Doug · linux-learning · read this at the Lucy screen.
+  The three layers, in one line: <b>you edit Layer 1</b>; Layer 2 forces the
+  <code>&lt;think&gt;</code>; Layer 3's tools preamble is why a system prompt sometimes
+  seems ignored.
+</footer>
+
+</body>
+</html>
